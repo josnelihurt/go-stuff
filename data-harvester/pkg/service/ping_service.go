@@ -1,17 +1,22 @@
 package service
 
-import "context"
+import (
+	"context"
+	"log"
+)
 
 type pingService struct{}
 
 //NewPingService returns an implementation of a DataHarvestService for ping recollector
-func NewPingService() DataHarvestService {
+func newPingService() DataHarvestService {
+	log.Println("Creating new NewPingService")
 	return &pingService{}
 }
 
 // New returns a DataHarvestService with all of the expected middleware wired in.
 func New(middleware []Middleware) DataHarvestService {
-	var svc = NewPingService()
+	log.Println("Creating new service")
+	var svc = newPingService()
 	for _, m := range middleware {
 		svc = m(svc)
 	}
@@ -22,6 +27,7 @@ func New(middleware []Middleware) DataHarvestService {
 func (context *pingService) Collect(ctx context.Context, param DataHarvestServiceParam) (DataHarvestServiceResult, error) {
 	return DataHarvestServiceResult{}, nil
 }
+
 func (context *pingService) Status(ctx context.Context) (bool, error) {
 	return false, nil
 }

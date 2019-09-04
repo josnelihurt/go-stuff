@@ -6,8 +6,10 @@ import (
 	"net/http"
 )
 
+//StatusRequest request package
 type StatusRequest struct{}
 
+//StatusResponse response package
 type StatusResponse struct {
 	Status bool `json:"status"`
 }

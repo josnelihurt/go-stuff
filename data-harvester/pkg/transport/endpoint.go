@@ -1,4 +1,4 @@
-package endpoint
+package transport
 
 import (
 	"context"
@@ -6,45 +6,40 @@ import (
 	"net/http"
 
 	service "github.com/josnelihurt/go-stuff/data-harvester/pkg/service"
-	"github.com/josnelihurt/go-stuff/data-harvester/pkg/transport"
 
 	"github.com/go-kit/kit/endpoint"
 )
 
-// Endpoints are exposed
-type Endpoints struct {
-	CollectEndpoint endpoint.Endpoint
-	StatusEndpoint  endpoint.Endpoint
-}
-
-// MakeStatusEndpoint returns the response from our service "status"
-func MakeStatusEndpoint(srv service.DataHarvestService) endpoint.Endpoint {
+// makeStatusEndpoint create a caller that will redirect the call into the service status
+func makeStatusEndpoint(srv service.DataHarvestService) endpoint.Endpoint {
 	return func(ctx context.Context, request interface{}) (interface{}, error) {
-		_ = request.(transport.StatusRequest) // we really just need the request, we don't use any value from it
+		_ = request.(StatusRequest) // we really just need the request, we don't use any value from it
 		s, err := srv.Status(ctx)
 		if err != nil {
-			return transport.StatusResponse{s}, err
+			return StatusResponse{s}, err
 		}
-		return transport.StatusResponse{s}, nil
+		return StatusResponse{s}, nil
 	}
 }
 
 // Status endpoint mapping
 func (e Endpoints) Status(ctx context.Context) (bool, error) {
-	req := transport.StatusRequest{}
+	req := StatusRequest{}
 	resp, err := e.StatusEndpoint(ctx, req)
 	if err != nil {
 		return false, err
 	}
-	statusResp := resp.(transport.StatusResponse)
+	statusResp := resp.(StatusResponse)
 	return statusResp.Status, nil
 }
+
+//DecodeStatusRequest parse data in
 func DecodeStatusRequest(ctx context.Context, r *http.Request) (interface{}, error) {
-	var req transport.StatusRequest
+	var req StatusRequest
 	return req, nil
 }
 
-// Last but not least, we have the encoder for the response output
+//EncodeResponse pase data out
 func EncodeResponse(ctx context.Context, w http.ResponseWriter, response interface{}) error {
 	return json.NewEncoder(w).Encode(response)
 }
