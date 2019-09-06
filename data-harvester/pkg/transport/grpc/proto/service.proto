@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package trasport;
+option go_package = "prot";
+
+message DataHarvestServiceRequest{
+
+}
+
+message DataHarvestServiceResponse{
+    bool Status = 1;
+}
+service DataHarvestService{
+    rpc Status (DataHarvestServiceRequest) returns (DataHarvestServiceResponse);
+}

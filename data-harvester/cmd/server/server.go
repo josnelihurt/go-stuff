@@ -4,15 +4,24 @@ import (
 	"context"
 	"flag"
 	"log"
+	"net"
 	"net/http"
 	"os"
 
 	kitLog "github.com/go-kit/kit/log"
-
-	httptransport "github.com/go-kit/kit/transport/http"
+	"github.com/go-kit/kit/tracing/opentracing"
 	"github.com/gorilla/mux"
-	"github.com/josnelihurt/go-stuff/data-harvester/pkg/service"
-	"github.com/josnelihurt/go-stuff/data-harvester/pkg/transport"
+	service "github.com/josnelihurt/go-stuff/data-harvester/pkg/service"
+	serviceEnpoint "github.com/josnelihurt/go-stuff/data-harvester/pkg/transport/endpoint"
+	serviceGrpc "github.com/josnelihurt/go-stuff/data-harvester/pkg/transport/grpc"
+	serviceProto "github.com/josnelihurt/go-stuff/data-harvester/pkg/transport/grpc/proto"
+	serviceHttp "github.com/josnelihurt/go-stuff/data-harvester/pkg/transport/http"
+	group "github.com/oklog/oklog/pkg/group"
+	opentracinggo "github.com/opentracing/opentracing-go"
+	grpc "google.golang.org/grpc"
+
+	gokitgrpc "github.com/go-kit/kit/transport/grpc"
+	gokithttp "github.com/go-kit/kit/transport/http"
 )
 
 const (
@@ -26,16 +35,16 @@ type Server struct {
 	httpAddress *string
 	errorChan   chan error
 	ctx         context.Context
-	endpoints   transport.Endpoints
+	endpoints   serviceEnpoint.Endpoints
+	service     service.DataHarvestService
 }
 
+var tracer opentracinggo.Tracer
 var logger kitLog.Logger
 
 func getServiceMiddleware(logger kitLog.Logger) (mw []service.Middleware) {
 	mw = []service.Middleware{}
 	mw = append(mw, service.LoggingMiddleware(logger))
-	// Append your middleware here
-
 	return
 }
 
@@ -50,42 +59,72 @@ func NewServer() *Server {
 	logger = kitLog.NewLogfmtLogger(os.Stderr)
 	logger = kitLog.With(logger, "ts", kitLog.DefaultTimestampUTC)
 	logger = kitLog.With(logger, "caller", kitLog.DefaultCaller)
-	srv := service.New(getServiceMiddleware(logger))
-	server.endpoints = transport.MakeEndpoints(srv)
+	tracer = opentracinggo.GlobalTracer()
+
+	server.service = service.New(getServiceMiddleware(logger))
+	server.endpoints = serviceEnpoint.MakeEndpoints(server.service)
 	return server
 }
 
 //GetErrorChannel returns the main error channel
-func (context *Server) GetErrorChannel() chan error {
-	return context.errorChan
+func (server *Server) GetErrorChannel() chan error {
+	return server.errorChan
 }
 
 //Run the internal components
-func (context *Server) Run() {
-	context.listentAndServeHTTP()
+func (server *Server) Run() {
+	server.newGRPC()
+	server.listenAndServeHTTP()
+}
+
+func (server *Server) newGRPC() {
+	options := map[string][]gokitgrpc.ServerOption{"Status": {gokitgrpc.ServerErrorLogger(logger), gokitgrpc.ServerBefore(opentracing.GRPCToContext(tracer, "Status", logger))}}
+	g := &group.Group{}
+	grpcListener, err := net.Listen("tcp", ":8081")
+	if err != nil {
+		logger.Log("transport", "gRPC", "during", "Listen", "err", err)
+	}
+	g.Add(func() error {
+		logger.Log("transport", "gRPC", "addr", ":8081")
+		baseServer := grpc.NewServer()
+		srv := serviceGrpc.NewGRPCServer(server.endpoints, options)
+		serviceProto.RegisterDataHarvestServiceServer(baseServer, srv)
+		return baseServer.Serve(grpcListener)
+	}, func(error) {
+		grpcListener.Close()
+	})
+	g.Run()
+
+	//initMetricsEndpoint(eps)
+	//initCancelInterrupt(g)
 }
 
 // NewHTTP is a good little server
-func (context *Server) NewHTTP() http.Handler {
+func (server *Server) newHTTP() http.Handler {
 	r := mux.NewRouter()
 	r.Use(commonMiddleware) // @see https://stackoverflow.com/a/51456342
 
-	r.Methods("GET").Path("/status").Handler(httptransport.NewServer(
-		context.endpoints.StatusEndpoint,
-		transport.DecodeStatusRequest,
-		transport.EncodeResponse,
+	r.Methods("GET").Path("/status").Handler(gokithttp.NewServer(
+		server.endpoints.StatusEndpoint,
+		serviceHttp.DecodeStatusRequest,
+		serviceHttp.EncodeResponse,
+	))
+	r.Methods("GET").Path("/discover").Handler(gokithttp.NewServer(
+		server.endpoints.CollectEndpoint,
+		serviceHttp.DecodeCollectRequest,
+		serviceHttp.EncodeCollectResponse,
 	))
 
 	return r
+}
+func (server *Server) listenAndServeHTTP() {
+	log.Println("service is listening on port:", *server.httpAddress)
+	handler := server.newHTTP()
+	server.errorChan <- http.ListenAndServe(*server.httpAddress, handler)
 }
 func commonMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Add("Content-Type", "application/json")
 		next.ServeHTTP(w, r)
 	})
-}
-func (context *Server) listentAndServeHTTP() {
-	log.Println("service is listening on port:", *context.httpAddress)
-	handler := context.NewHTTP()
-	context.errorChan <- http.ListenAndServe(*context.httpAddress, handler)
 }

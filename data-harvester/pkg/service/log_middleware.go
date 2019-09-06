@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 
 	log "github.com/go-kit/kit/log"
 )
@@ -22,13 +23,15 @@ func LoggingMiddleware(logger log.Logger) Middleware {
 //Collect implemented from Service
 func (context *loggingMiddleware) Collect(ctx context.Context, param DataHarvestServiceParam) (result DataHarvestServiceResult, err error) {
 	defer func() {
-		context.logger.Log("method", "Collect", "param", param, "result", result, "err", err)
+		val, _ := json.Marshal(result)
+		context.logger.Log("method", "Collect", "param", "none", "result", val, "err", err)
 	}()
-	return context.next.Collect(ctx, param)
+	result, err = context.next.Collect(ctx, param)
+	return result, err
 }
 func (context *loggingMiddleware) Status(ctx context.Context) (result bool, err error) {
 	defer func() {
 		context.logger.Log("method", "Status", "result", result, "err", err)
 	}()
-	return false, nil
+	return context.next.Status(ctx)
 }

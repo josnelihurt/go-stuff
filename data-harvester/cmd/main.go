@@ -16,7 +16,9 @@ func interruptHandler(errChan chan<- error) {
 	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
 	errChan <- fmt.Errorf("%s", <-c)
 }
+
 func main() {
+
 	server := server.NewServer()
 	go interruptHandler(server.GetErrorChannel())
 	go server.Run()
